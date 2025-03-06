@@ -3,7 +3,8 @@ import datetime
 import json
 import logging
 import os
-
+from azure.search.documents import SearchClient
+from azure.search.documents.models import VectorizableTextQuery
 from azure_index import AzureIndex
 from embeddings import GetEmbeddings
 from sharepoint import SharepointConnector
@@ -31,7 +32,7 @@ def create_index_func(req:func.HttpRequest)->func.HttpResponse:
           if list_id:
               logging.info(f"List ID: {list_id}")
               list_data,field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
-              field_name="Status"
+              field_names=["Status","Level1","Level2","ContentType","Title","Level3","Likelihood","RiskIssueStrategy","ProgramRisk","IsEsclated","TargetDate","Modified"]
 
               embedding_generator = GetEmbeddings()
 
@@ -75,3 +76,10 @@ def MyHttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
              status_code=200
         )
         
+@app.route(route="ragchatbot", auth_level=func.AuthLevel.FUNCTION)
+def rag_chatbot(req: func.HttpRequest)->func.HttpResponse:
+    req_body = req.get_json()
+    query = req_body.get('query')
+    azure_search = AzureIndex(SEARCH_ENDPOINT,SEARCH_ADMIN_KEY,SEARCH_INDEX_NAME)
+    vector_query = VectorizableTextQuery(text=query, k_nearest_neighbors=1, fields="contentVector", exhaustive=True)
+    results = azure_search.search(search_text=None,vector_queries= [vector_query],top=1)  

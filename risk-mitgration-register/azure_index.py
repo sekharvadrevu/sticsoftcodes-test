@@ -23,8 +23,17 @@ class AzureIndex:
 
             fields = [
                 SimpleField(name="id", type="Edm.String", key=True),
-                SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
-                
+                # SearchableField(name="title",type="Edm.String"),
+                # SearchableField(name="ContentType",type="Edm.String"),
+                # SearchableField(name="Impact",type="Edm.String"),
+                # SearchableField(name="FinancialImpact",type="Edm.String"),
+                 SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
+                # SearchableField(name="Likelihood",type="Edm.String"),
+                # SearchField(name="RiskIssueRaisedBy",type="Edm.String"),
+                # SearchableField(name="Level1", type="Edm.String"),
+                # SearchableField(name="Level2",type="Edm.String"),
+                # SearchableField(name="Level3", type="Edm.String"),
+                # SearchableField(name="status",type="Edm.String"),
                 ] 
             vector_search = VectorSearch(
             algorithms=[HnswAlgorithmConfiguration(name="myHnsw")],
@@ -47,7 +56,7 @@ class AzureIndex:
                 elif isinstance(field, int):
                     field_type = "Edm.Int32"  
 
-                fields.append(SimpleField(name=sanitized_field, type=field_type))
+                fields.append(SearchableField(name=sanitized_field, type=field_type,searchable=True))
                 
             index = SearchIndex(
                 name=self.search_index_name,
@@ -89,8 +98,9 @@ class AzureIndex:
                 # Add fields from the SharePoint data
                 for field in field_names:
                     sanitized_field = self.sanitize_field_name(field)
-                    field_value = item["fields"].get(field, "N/A")
-                    
+                    field_value = item["fields"].get(field, "")
+                    if field_value is None:
+                     field_value = ""
                     # Sanitize and add the field value to the document
                     if isinstance(field_value, str):
                         doc[sanitized_field] = str(field_value)
