@@ -8,75 +8,108 @@ from azure.search.documents.indexes.models import (
     SemanticConfiguration, SemanticPrioritizedFields,
     SemanticField, SemanticSearch
 )
+import re
 class AzureIndex:
-    
+    def __init__(self, search_endpoint, search_admin_key, search_index_name):
+        self.search_endpoint = search_endpoint
+        self.search_admin_key = search_admin_key
+        self.search_index_name = search_index_name
+    def sanitize_field_name(self, field_name):
+        sanitized_name = re.sub(r'^[^a-zA-Z]+', '', field_name)  
+        sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', sanitized_name)  
+        return sanitized_name
     def create_azure_search_index(self, field_names):
-            index_client = SearchIndexClient(endpoint=SEARCH_ENDPOINT, credential=AzureKeyCredential(SEARCH_ADMIN_KEY))
+            index_client = SearchIndexClient(endpoint=self.search_endpoint, credential=AzureKeyCredential(self.search_admin_key))
 
-            # Create fields dynamically based on SharePoint list fields
-            fields = [SimpleField(name="id", type="Edm.String", key=True)]  # Add a primary key field
+            fields = [
+                SimpleField(name="id", type="Edm.String", key=True),
+                SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
+                
+                ] 
+            vector_search = VectorSearch(
+            algorithms=[HnswAlgorithmConfiguration(name="myHnsw")],
+            profiles=[VectorSearchProfile(name="myHnswProfile", algorithm_configuration_name="myHnsw")])
 
+        #     semantic_config = SemanticConfiguration(
+        #     name="my-semantic-config",
+        #     prioritized_fields=SemanticPrioritizedFields(content_fields=[SemanticField(field_name="content")])
+        # )
+
+        #     semantic_search = SemanticSearch(configurations=[semantic_config])
             for field in field_names:
                 sanitized_field = self.sanitize_field_name(field)
-                
-                # Here, we can add logic to determine the correct type (e.g., Edm.Double for numbers)
-                field_type = "Edm.String"  # Default to Edm.String
+                 
+                field_type = "Edm.String" 
                 
                 # Check if the field is numeric in nature
                 if isinstance(field, (int, float)):
-                    field_type = "Edm.Double"  # Change to Edm.Double for numeric fields
+                    field_type = "Edm.Double"  
                 elif isinstance(field, int):
-                    field_type = "Edm.Int32"  # Change to Edm.Int32 if integer
+                    field_type = "Edm.Int32"  
 
                 fields.append(SimpleField(name=sanitized_field, type=field_type))
                 
             index = SearchIndex(
-                name=SEARCH_INDEX_NAME,
-                fields=fields
+                name=self.search_index_name,
+                fields=fields,
+                vector_search=vector_search
+                
             )
 
             try:
-                # Check if the index exists
-                existing_index = index_client.get_index(SEARCH_INDEX_NAME)
-                print(f"Index '{SEARCH_INDEX_NAME}' already exists. Deleting the existing index...")
-                index_client.delete_index(SEARCH_INDEX_NAME)
-                print(f"Index '{SEARCH_INDEX_NAME}' has been deleted.")
+                
+                existing_index = index_client.get_index(self.search_index_name)
+                print(f"Index '{self.search_index_name}' already exists. Deleting the existing index...")
+                index_client.delete_index(self.search_index_name)
+                print(f"Index '{self.search_index_name}' has been deleted.")
             except Exception as e:
-                print(f"Index '{SEARCH_INDEX_NAME}' not found.")
+                print(f"Index '{self.search_index_name}' not found.")
 
             try:
-                print(f"Creating index '{SEARCH_INDEX_NAME}'...")
+                print(f"Creating index '{self.search_index_name}'...")
                 index_client.create_index(index)
-                print(f"Index '{SEARCH_INDEX_NAME}' has been created successfully.")
+                print(f"Index '{self.search_index_name}' has been created successfully.")
             except Exception as e:
-                print(f"Error creating index '{SEARCH_INDEX_NAME}': {e}")
-    def upload_data_to_azure_search(self, data, field_names):
-                try:
-                    search_client = SearchClient(endpoint=SEARCH_ENDPOINT, index_name=SEARCH_INDEX_NAME, credential=AzureKeyCredential(SEARCH_ADMIN_KEY))
+                print(f"Error creating index '{self.search_index_name}': {e}")
+    
+    def upload_data_to_azure_search(self, data, embeddings, field_names):
+        try:
+            # Initialize SearchClient
+            search_client = SearchClient(
+                endpoint=self.search_endpoint,
+                index_name=self.search_index_name,
+                credential=AzureKeyCredential(self.search_admin_key)
+            )
+            
+            documents = []
+            for idx, item in enumerate(data):
+                # Initialize the document with an ID
+                doc = {"id": str(item["id"])}  
+                
+                # Add fields from the SharePoint data
+                for field in field_names:
+                    sanitized_field = self.sanitize_field_name(field)
+                    field_value = item["fields"].get(field, "N/A")
                     
-                    # Prepare data to be uploaded
-                    documents = []
-                    for item in data:
-                        doc = {"id": str(item["id"])}  # Ensure ID is a string
-                        for field in field_names:
-                            sanitized_field = self.sanitize_field_name(field)
-                            # Get the field value
-                            field_value = item["fields"].get(field, "N/A")
-                            
-                            # Handle data type conversions
-                            if isinstance(field_value, str):
-                                doc[sanitized_field] = str(field_value)
-                            elif isinstance(field_value, (int, float)):
-                                doc[sanitized_field] = str(field_value)
-                            else:
-                                doc[sanitized_field] = str(field_value)  # Convert other types to string
+                    # Sanitize and add the field value to the document
+                    if isinstance(field_value, str):
+                        doc[sanitized_field] = str(field_value)
+                    elif isinstance(field_value, (int, float)):
+                        doc[sanitized_field] = str(field_value)
+                    else:
+                        doc[sanitized_field] = str(field_value)
+                
+                
+                doc['contentVector'] = embeddings[idx]  
 
-                        documents.append(doc)
+                documents.append(doc)
 
-                    # Upload data to the Azure Search index
-                    if documents:
-                        result = search_client.upload_documents(documents)
-                        print(f"Uploaded {len(result)} documents to the index.")
-                except Exception as e:
-                    print(f"Error uploading data to Azure Search: {str(e)}")
-
+            # Upload documents to Azure Search if there are documents to upload
+            if documents:
+                result = search_client.upload_documents(documents)
+                print(f"Uploaded {len(result)} documents to the index.")
+            else:
+               print("No documents to upload.")
+                
+        except Exception as e:
+           print(f"Error uploading data to Azure Search: {str(e)}")
