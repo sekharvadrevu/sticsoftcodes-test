@@ -1,8 +1,12 @@
 import azure.functions as func
 import datetime
 import json
+from azure.search.documents.models import VectorizedQuery
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
 import logging
 import os
+from openai import AzureOpenAI
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizableTextQuery
 from azure_index import AzureIndex
@@ -17,6 +21,26 @@ list_url = os.getenv('list_urls')
 SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT")
 SEARCH_ADMIN_KEY = os.getenv("SEARCH_ADMIN_KEY")
 SEARCH_INDEX_NAME = os.getenv("SEARCH_INDEX_NAME")
+credential = AzureKeyCredential(str(SEARCH_ADMIN_KEY))
+
+client = AzureOpenAI(
+    api_version=os.getenv("AZURE_OPENAI_EMBEDDING_API_VERSION"),
+    azure_endpoint=os.getenv("azure_oepnai_endpoint"),
+    api_key=os.getenv("azure_openai_key"),
+)
+search_client = SearchClient(endpoint=SEARCH_ENDPOINT, index_name=SEARCH_INDEX_NAME, credential=credential)
+
+# In-memory cache to store past questions
+cache = {
+    "past_questions": []
+}
+ 
+def truncate_text(text, max_length):
+    """Truncate text to ensure it doesn't exceed the max_length."""
+    if len(text) > max_length:
+        return text[:max_length] + "..."
+    return text
+ 
 
 @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
 def create_index_func(req:func.HttpRequest)->func.HttpResponse:
@@ -32,7 +56,7 @@ def create_index_func(req:func.HttpRequest)->func.HttpResponse:
           if list_id:
               logging.info(f"List ID: {list_id}")
               list_data,field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
-              field_names=["Status","Level1","Level2","ContentType","Title","Level3","Likelihood","RiskIssueStrategy","ProgramRisk","IsEsclated","TargetDate","Modified"]
+              field_names=["Status","Level1","Level2","ContentType","Title","Level3","Likelihood","RiskId","RiskIssueStrategy","ProgramRisk","IsEsclated","TargetDate","Modified","Impact","FinancialImpact"]
 
               embedding_generator = GetEmbeddings()
 
@@ -78,8 +102,90 @@ def MyHttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
         
 @app.route(route="ragchatbot", auth_level=func.AuthLevel.FUNCTION)
 def rag_chatbot(req: func.HttpRequest)->func.HttpResponse:
-    req_body = req.get_json()
-    query = req_body.get('query')
-    azure_search = AzureIndex(SEARCH_ENDPOINT,SEARCH_ADMIN_KEY,SEARCH_INDEX_NAME)
-    vector_query = VectorizableTextQuery(text=query, k_nearest_neighbors=1, fields="contentVector", exhaustive=True)
-    results = azure_search.search(search_text=None,vector_queries= [vector_query],top=1)  
+    try:
+        
+        req_body = req.get_json()
+        query = req_body.get("query")
+ 
+        
+        global cache
+        past_questions = cache["past_questions"]
+ 
+        if query not in past_questions:
+            past_questions.append(query)
+ 
+        if len(past_questions) > 5:
+            past_questions.pop(0)
+ 
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string")
+ 
+       
+        try:
+            embedding = client.embeddings.create(input=query, model="text-embedding-ada-002").data[0].embedding
+        except Exception as e:
+            raise func.HttpResponse(f"Error in embedding creation: {e}", status_code=500)
+ 
+       
+        vector_query = VectorizedQuery(vector=embedding, k_nearest_neighbors=3, fields="contentVector", exhaustive=True)
+        results = search_client.search(
+            search_text=query,
+            vector_queries=[vector_query],
+            select=["id", "status", "Level1"],
+            top=3
+        )
+ 
+        result_data = []
+        for result in results:
+            result_data.append({
+                "id": result["id"],
+                "status": result["status"],
+                "Level1": result["Level1"]
+            })
+ 
+        
+        result_display = "\n".join([f"Id: {r['id']}, status: {r['status']}" for r in result_data])
+ 
+        last_five_questions = "\n".join(past_questions)
+ 
+        prompt = f'''
+        You are a helpful assistant that responds to queries based on the context provided.
+        
+        CURRENT QUERY: {query}
+        PAST QUESTIONS: {last_five_questions}
+        QUERY TYPE: Hybrid Search
+        CONTEXTUAL GUIDANCE:
+        - This query is part of a hybrid search that combines both keyword-based and vector-based search methods.
+        - You should consider the context of both the current query and past questions.
+        - Provide a response that is not only accurate but also coherent with previous inquiries, ensuring consistency.
+        - Offer suggestions or further elaboration where applicable, depending on the nature of the question.
+        Based on the information above, craft a thoughtful response to the current query.
+        '''
+ 
+
+        
+        max_prompt_length = 2048
+        prompt = truncate_text(prompt, max_prompt_length)
+ 
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "system", "content": prompt}]
+            )
+            output = response.choices[0].message.content
+        except Exception as e:
+            return func.HttpResponse(f"Error generating response: {e}", status_code=500)
+ 
+        
+        return func.HttpResponse(
+            json.dumps({
+               
+                "search_results": result_display
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+
+ 
+    except Exception as e:
+        return func.HttpResponse(f"Error: {str(e)}", status_code=500)

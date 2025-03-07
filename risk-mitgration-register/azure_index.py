@@ -23,45 +23,52 @@ class AzureIndex:
 
             fields = [
                 SimpleField(name="id", type="Edm.String", key=True),
-                # SearchableField(name="title",type="Edm.String"),
-                # SearchableField(name="ContentType",type="Edm.String"),
-                # SearchableField(name="Impact",type="Edm.String"),
-                # SearchableField(name="FinancialImpact",type="Edm.String"),
-                 SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
-                # SearchableField(name="Likelihood",type="Edm.String"),
-                # SearchField(name="RiskIssueRaisedBy",type="Edm.String"),
-                # SearchableField(name="Level1", type="Edm.String"),
-                # SearchableField(name="Level2",type="Edm.String"),
-                # SearchableField(name="Level3", type="Edm.String"),
-                # SearchableField(name="status",type="Edm.String"),
+                SearchableField(name="Title",type="Edm.String",searchable=True),
+                SearchableField(name="ContentType",type="Edm.String",searchable=True),
+                SearchableField(name="Impact",type="Edm.String",searchable=True),
+                SearchableField(name="FinancialImpact",type="Edm.Double"),
+                SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
+                SearchableField(name="Likelihood",type="Edm.String",searchable=True),
+                SearchableField(name="IsEsclated",type="Edm.String",searchable=True),
+                SearchableField(name="TargetDate",type="Edm.String"),
+                SearchableField(name="Modified",type="Edm.String"),
+                SearchableField(name="RiskIssueStrategy",type="Edm.String",searchable=True),
+                SearchableField(name="RiskIssueRaisedBy",type="Edm.String",searchable=True),
+                SearchableField(name="Level1", type="Edm.String",searchable=True),
+                SearchableField(name="Level2",type="Edm.String",searchable=True),
+                SearchableField(name="Level3", type="Edm.String",searchable=True),
+                SearchableField(name="status",type="Edm.String",searchable=True),
+                SearchableField(name="RiskId",type="Edm.String",searchable=True),
+                SearchableField(name="ProgramRisk",type="Edm.String",searchable=True)
                 ] 
             vector_search = VectorSearch(
             algorithms=[HnswAlgorithmConfiguration(name="myHnsw")],
             profiles=[VectorSearchProfile(name="myHnswProfile", algorithm_configuration_name="myHnsw")])
 
-        #     semantic_config = SemanticConfiguration(
-        #     name="my-semantic-config",
-        #     prioritized_fields=SemanticPrioritizedFields(content_fields=[SemanticField(field_name="content")])
-        # )
+            semantic_config = SemanticConfiguration(
+            name="my-semantic-config",
+            prioritized_fields=SemanticPrioritizedFields(content_fields=[SemanticField(field_name="Title")])
+        )
 
-        #     semantic_search = SemanticSearch(configurations=[semantic_config])
+            semantic_search = SemanticSearch(configurations=[semantic_config])
             for field in field_names:
                 sanitized_field = self.sanitize_field_name(field)
                  
                 field_type = "Edm.String" 
                 
-                # Check if the field is numeric in nature
+                
                 if isinstance(field, (int, float)):
                     field_type = "Edm.Double"  
                 elif isinstance(field, int):
                     field_type = "Edm.Int32"  
 
-                fields.append(SearchableField(name=sanitized_field, type=field_type,searchable=True))
+                # fields.append(SearchableField(name=sanitized_field, type=field_type,searchable=True))
                 
             index = SearchIndex(
                 name=self.search_index_name,
                 fields=fields,
-                vector_search=vector_search
+                vector_search=vector_search,
+                semantic_search=semantic_search
                 
             )
 
@@ -83,7 +90,7 @@ class AzureIndex:
     
     def upload_data_to_azure_search(self, data, embeddings, field_names):
         try:
-            # Initialize SearchClient
+           
             search_client = SearchClient(
                 endpoint=self.search_endpoint,
                 index_name=self.search_index_name,
@@ -92,16 +99,16 @@ class AzureIndex:
             
             documents = []
             for idx, item in enumerate(data):
-                # Initialize the document with an ID
+               
                 doc = {"id": str(item["id"])}  
                 
-                # Add fields from the SharePoint data
+                
                 for field in field_names:
                     sanitized_field = self.sanitize_field_name(field)
                     field_value = item["fields"].get(field, "")
                     if field_value is None:
                      field_value = ""
-                    # Sanitize and add the field value to the document
+                   
                     if isinstance(field_value, str):
                         doc[sanitized_field] = str(field_value)
                     elif isinstance(field_value, (int, float)):
@@ -114,7 +121,7 @@ class AzureIndex:
 
                 documents.append(doc)
 
-            # Upload documents to Azure Search if there are documents to upload
+            
             if documents:
                 result = search_client.upload_documents(documents)
                 print(f"Uploaded {len(result)} documents to the index.")
