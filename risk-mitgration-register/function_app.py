@@ -22,11 +22,13 @@ SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT")
 SEARCH_ADMIN_KEY = os.getenv("SEARCH_ADMIN_KEY")
 SEARCH_INDEX_NAME = os.getenv("SEARCH_INDEX_NAME")
 credential = AzureKeyCredential(str(SEARCH_ADMIN_KEY))
-
+azure_endpoint=os.getenv("azure_oepnai_endpoint")
+azure_openai_key=os.getenv("azure_openai_key")
+api_verison=os.getenv("AZURE_OPENAI_EMBEDDING_API_VERSION")
 client = AzureOpenAI(
-    api_version=os.getenv("AZURE_OPENAI_EMBEDDING_API_VERSION"),
-    azure_endpoint=os.getenv("azure_oepnai_endpoint"),
-    api_key=os.getenv("azure_openai_key"),
+    api_version=api_verison,
+    azure_endpoint=azure_endpoint,
+    api_key=azure_openai_key,
 )
 search_client = SearchClient(endpoint=SEARCH_ENDPOINT, index_name=SEARCH_INDEX_NAME, credential=credential)
 
@@ -99,93 +101,182 @@ def MyHttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
              "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
              status_code=200
         )
-        
+
+
+
 @app.route(route="ragchatbot", auth_level=func.AuthLevel.FUNCTION)
-def rag_chatbot(req: func.HttpRequest)->func.HttpResponse:
+def ragchabot(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        
+       
         req_body = req.get_json()
-        query = req_body.get("query")
- 
-        
+        user_query=req_body["query"] 
+       
         global cache
         past_questions = cache["past_questions"]
- 
-        if query not in past_questions:
-            past_questions.append(query)
- 
+        if user_query not in past_questions:
+            past_questions.append(user_query)
         if len(past_questions) > 5:
             past_questions.pop(0)
  
-        if not isinstance(query, str):
+        if not isinstance(user_query, str):
             raise ValueError("Query must be a string")
  
-       
+    
         try:
-            embedding = client.embeddings.create(input=query, model="text-embedding-ada-002").data[0].embedding
+            embedding = client.embeddings.create(input=user_query, model="text-embedding-ada-002").data[0].embedding
         except Exception as e:
             raise func.HttpResponse(f"Error in embedding creation: {e}", status_code=500)
  
-       
         vector_query = VectorizedQuery(vector=embedding, k_nearest_neighbors=3, fields="contentVector", exhaustive=True)
         results = search_client.search(
-            search_text=query,
+            search_text=user_query,
             vector_queries=[vector_query],
-            select=["id", "status", "Level1"],
+            select=["id", "status"],
             top=3
         )
  
-        result_data = []
+        # Display search results
+        result_output = []
         for result in results:
-            result_data.append({
-                "id": result["id"],
-                "status": result["status"],
-                "Level1": result["Level1"]
+            result_output.append({
+                "Id": result["id"],
+                "status": result["status"]
             })
  
-        
-        result_display = "\n".join([f"Id: {r['id']}, status: {r['status']}" for r in result_data])
+        # Convert result to string to display
+        result_display = "\n".join([f"Id: {r['Id']}, status: {r['status']}" for r in result_output])
  
         last_five_questions = "\n".join(past_questions)
- 
-        prompt = f'''
-        You are a helpful assistant that responds to queries based on the context provided.
         
-        CURRENT QUERY: {query}
-        PAST QUESTIONS: {last_five_questions}
-        QUERY TYPE: Hybrid Search
-        CONTEXTUAL GUIDANCE:
-        - This query is part of a hybrid search that combines both keyword-based and vector-based search methods.
-        - You should consider the context of both the current query and past questions.
-        - Provide a response that is not only accurate but also coherent with previous inquiries, ensuring consistency.
-        - Offer suggestions or further elaboration where applicable, depending on the nature of the question.
-        Based on the information above, craft a thoughtful response to the current query.
-        '''
- 
-
-        
-        max_prompt_length = 2048
-        prompt = truncate_text(prompt, max_prompt_length)
- 
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "system", "content": prompt}]
-            )
-            output = response.choices[0].message.content
+            azure_client=client.chat.completions.create(
+              model="gpt-4o",
+              messages=[{"role":"system" ,"content":"Fetching the information from the sharepoint list based on keywords and giving relevant data"},
+                       {"role":"user","content":user_query}], max_tokens=600,temperature=1)
+            user_update=azure_client.choices[0].message.content.strip() 
+                          
+          
         except Exception as e:
             return func.HttpResponse(f"Error generating response: {e}", status_code=500)
- 
         
+        try:
+            results = search_client.search(search_text=user_update, top=5)
+            responselist=[]
+            select_fields=["Title","Likelihood","Level1","status"]
+            for result in results:
+                    responseutils=[]
+                    for field in select_fields:
+                     if field in result and isinstance(result[field], str) and result[field].strip():
+                        responseutils.append(f"{field.capitalize()}: {result[field].strip()}")
+                    if responseutils:
+                        responselist.append("\n".join(responseutils))
+            responselist = " ".join(responselist)
+        except Exception as e:
+            logging.error(f"Error get the revelant information search results: {str(e)}")
+            
+    
+        try:
+            azure_client = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": responselist},
+                    {"role": "user", "content": user_query}
+                ],
+                max_tokens=800,
+                temperature=1
+            )
+            response = azure_client.choices[0].message.content
+        except Exception as e:
+            print("Error response",str(e))
+            response = "we are not able not generate response from api"
+
+        
+       
+
         return func.HttpResponse(
-            json.dumps({
-               
-                "search_results": result_display
-            }),
+            json.dumps(response),
             mimetype="application/json",
             status_code=200
         )
 
- 
     except Exception as e:
-        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+        logging.error(f"Error occurred: {str(e)}")
+        return func.HttpResponse("An error occurred while processing your request.", status_code=500)
+    
+        
+@app.route(route="ragchatbot2", auth_level=func.AuthLevel.FUNCTION)
+def rag_chat_bot_session(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Processing request in Azure Function.')
+
+    
+    req_body = req.get_json()
+    user_query=req_body["query"] 
+    if not user_query:
+        return func.HttpResponse("Please pass a query on the query string", status_code=400)
+
+    
+    GROUNDED_PROMPT = """
+    You are an AI assistant that helps users learn from the information found in the source material.
+    Fetching the information from the SharePoint list based on keywords and giving relevant data.
+
+    Query: {query}
+    Sources:\n{sources}
+    """
+    
+    try:
+        
+        embedding = client.embeddings.create(input=[user_query], model="text-embedding-ada-002").data[0].embedding
+    except Exception as e:
+        logging.error(f"Error in embedding creation: {e}")
+        return func.HttpResponse("Error in embedding creation", status_code=500)
+    
+    
+    vector_query = VectorizedQuery(vector=embedding, k_nearest_neighbors=3, fields="contentVector", exhaustive=True)
+
+    
+    try:
+        search_results = search_client.search(
+            search_text=user_query,
+            vector_queries=[vector_query],
+            select=["Title", "id", "status"],
+            top=5,
+        )
+    except Exception as e:
+        logging.error(f"Error during search query execution: {e}")
+        return func.HttpResponse("Error during search query execution", status_code=500)
+
+    
+    sources_formatted = "=================\n".join(
+        [f'TITLE: {document["Title"]}, id: {document["id"]}, status: {document["status"]}' for document in search_results]
+    )
+
+    
+    try:
+        response = client.chat.completions.create(
+            messages=[{
+                "role": "user",
+                "content": GROUNDED_PROMPT.format(query=user_query, sources=sources_formatted)
+            }],
+            model="gpt-4o",
+            temperature=1,
+            top_p=5
+        )
+        response=response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"Error generating response from the model: {e}")
+        return func.HttpResponse("Error generating response", status_code=500)
+
+    
+    return func.HttpResponse(
+                json.dumps(response),
+                mimetype="application/json",
+                status_code=200
+            )
+    
+
+ 
+            
+    
+    
+
+ 
