@@ -204,7 +204,7 @@ def ragchabot(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("An error occurred while processing your request.", status_code=500)
     
         
-@app.route(route="ragchatbot2", auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="ragchatbot1", auth_level=func.AuthLevel.FUNCTION)
 def rag_chat_bot_session(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Processing request in Azure Function.')
 
@@ -238,6 +238,82 @@ def rag_chat_bot_session(req: func.HttpRequest) -> func.HttpResponse:
         search_results = search_client.search(
             search_text=user_query,
             vector_queries=[vector_query],
+            select=["Title", "id", "status"],
+            top=5,
+        )
+    except Exception as e:
+        logging.error(f"Error during search query execution: {e}")
+        return func.HttpResponse("Error during search query execution", status_code=500)
+
+    
+    sources_formatted = "=================\n".join(
+        [f'TITLE: {document["Title"]}, id: {document["id"]}, status: {document["status"]}' for document in search_results]
+    )
+
+    
+    try:
+        response = client.chat.completions.create(
+            messages=[{
+                "role": "user",
+                "content": GROUNDED_PROMPT.format(query=user_query, sources=sources_formatted)
+            }],
+            model="gpt-4o",
+            temperature=1,
+            top_p=5
+        )
+        response=response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"Error generating response from the model: {e}")
+        return func.HttpResponse("Error generating response", status_code=500)
+
+    
+    return func.HttpResponse(
+                json.dumps(response),
+                mimetype="application/json",
+                status_code=200
+            )
+    
+
+ 
+            
+    
+    
+# semantic query 
+         
+@app.route(route="ragchatbot2", auth_level=func.AuthLevel.FUNCTION)
+def rag_chat_bot_session1(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Processing request in Azure Function.')
+
+    
+    req_body = req.get_json()
+    user_query=req_body["query"] 
+    if not user_query:
+        return func.HttpResponse("Please pass a query on the query string", status_code=400)
+
+    
+    GROUNDED_PROMPT = """
+    You are an AI assistant that helps users learn from the information found in the source material.
+    Fetching the information from the SharePoint list based on keywords and giving relevant data.
+
+    Query: {query}
+    Sources:\n{sources}
+    """
+    
+    # try:
+        
+    #     embedding = client.embeddings.create(input=[user_query], model="text-embedding-ada-002").data[0].embedding
+    # except Exception as e:
+    #     logging.error(f"Error in embedding creation: {e}")
+    #     return func.HttpResponse("Error in embedding creation", status_code=500)
+    
+    
+    # vector_query = VectorizedQuery(vector=embedding, k_nearest_neighbors=3, fields="contentVector", exhaustive=True)
+
+    
+    try:
+        search_results = search_client.search(
+            search_text=user_query,
+            query_type="semantic",
             select=["Title", "id", "status"],
             top=5,
         )

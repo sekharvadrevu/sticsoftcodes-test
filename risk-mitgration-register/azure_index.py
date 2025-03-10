@@ -1,3 +1,4 @@
+from datetime import datetime
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchIndex
@@ -30,8 +31,8 @@ class AzureIndex:
                 SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
                 SearchableField(name="Likelihood",type="Edm.String",searchable=True),
                 SearchableField(name="IsEsclated",type="Edm.String",searchable=True),
-                SearchableField(name="TargetDate",type="Edm.String"),
-                SearchableField(name="Modified",type="Edm.String"),
+                SearchableField(name="TargetDate",type="Edm.DateTimeOffset"),
+                SearchableField(name="Modified",type="Edm.DateTimeOffset"),
                 SearchableField(name="RiskIssueStrategy",type="Edm.String",searchable=True),
                 SearchableField(name="RiskIssueRaisedBy",type="Edm.String",searchable=True),
                 SearchableField(name="Level1", type="Edm.String",searchable=True),
@@ -119,6 +120,23 @@ class AzureIndex:
                         doc[sanitized_field] = str(field_value)
                 financial_impact = item.get("FinancialImpact", "0.0")
                 doc['FinancialImpact']=float(financial_impact)
+                # target_date=item.get("TargetDate")
+                # Modified=item.get("Modified")
+                # if target_date:
+                #     try:
+                #         target_date = datetime.strptime(target_date, "%Y-%m-%dT%H:%M:%S.%fZ")  
+                #         target_date = target_date.isoformat()  
+                #         print("target_date",target_date)
+                #     except ValueError:
+                #         target_date = None  
+                # if Modified:
+                #     try:
+                #         Modified = datetime.strptime(Modified, "%Y-%m-%dT%H:%M:%S.%fZ")  
+                #         Modified = Modified.isoformat()  
+                #     except ValueError:
+                #         target_date = None  
+                # doc['TargetDate'] = target_date
+                # doc["Modified"]= Modified
                 doc['contentVector'] = embeddings[idx]  
 
                 documents.append(doc)
