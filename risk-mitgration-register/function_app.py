@@ -135,7 +135,7 @@ def ragchabot(req: func.HttpRequest) -> func.HttpResponse:
             top=3
         )
  
-        # Display search results
+        
         result_output = []
         for result in results:
             result_output.append({

@@ -26,7 +26,7 @@ class AzureIndex:
                 SearchableField(name="Title",type="Edm.String",searchable=True),
                 SearchableField(name="ContentType",type="Edm.String",searchable=True),
                 SearchableField(name="Impact",type="Edm.String",searchable=True),
-                SearchableField(name="FinancialImpact",type="Edm.Double"),
+                SimpleField(name="FinancialImpact",type="Edm.Double"),
                 SearchField(name="contentVector", type="Collection(Edm.Single)", searchable=True, vector_search_dimensions=1536, vector_search_profile_name="myHnswProfile"),
                 SearchableField(name="Likelihood",type="Edm.String",searchable=True),
                 SearchableField(name="IsEsclated",type="Edm.String",searchable=True),
@@ -87,6 +87,8 @@ class AzureIndex:
                 print(f"Index '{self.search_index_name}' has been created successfully.")
             except Exception as e:
                 print(f"Error creating index '{self.search_index_name}': {e}")
+                
+   
     
     def upload_data_to_azure_search(self, data, embeddings, field_names):
         try:
@@ -115,8 +117,8 @@ class AzureIndex:
                         doc[sanitized_field] = str(field_value)
                     else:
                         doc[sanitized_field] = str(field_value)
-                
-                
+                financial_impact = item.get("FinancialImpact", "0.0")
+                doc['FinancialImpact']=float(financial_impact)
                 doc['contentVector'] = embeddings[idx]  
 
                 documents.append(doc)
