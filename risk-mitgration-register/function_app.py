@@ -44,44 +44,85 @@ def truncate_text(text, max_length):
     return text
  
 
+# @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
+# def create_index_func(req:func.HttpRequest)->func.HttpResponse:
+#     logging.info("create index triggered has been started")
+#     delta = req.params.get('delta', 'false').lower() == 'true'  
+#     delta_value = req.params.get('delta_value', '1')  
+#     delta_type = req.params.get('delta_type', 'days') 
+#     sharepoint_site_details=SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url,delta,delta_value,delta_type)
+#     site_id=sharepoint_site_details.get_sharepoint_id()
+#     if site_id:
+#           logging.info(f"Site ID: {site_id}")
+#           list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+#           if list_id:
+#               logging.info(f"List ID: {list_id}")
+#               list_data,field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+#               field_names=["Status","Level1","Level2","ContentType","Title","Level3","Likelihood","RiskId","RiskIssueStrategy","RiskIssueRaisedBy","ProgramRisk","IsEsclated","TargetDate","Modified","Impact","FinancialImpact"]
+
+#               embedding_generator = GetEmbeddings()
+
+#               embeddings = []
+#               for item in list_data:
+#                     field_value = item.get("fields", {}).get("Status")  
+#                     print(field_value)
+#                     if field_value:
+#                         embedding = embedding_generator.generate_embeddings(field_value)
+#                         embeddings.append(embedding)
+#                     else:
+#                         embeddings.append([])
+#               if list_data:
+#                    azure_search = AzureIndex(SEARCH_ENDPOINT,SEARCH_ADMIN_KEY,SEARCH_INDEX_NAME)
+#                    azure_search.create_azure_search_index(field_names)
+#                    azure_search.upload_data_to_azure_search(list_data, embeddings,field_names)
+#                    return func.HttpResponse("Data indexed successfully!", status_code=200)
+#               else:
+#                 return func.HttpResponse("No new or modified data found in the SharePoint list.", status_code=404)
+                  
+#           else:
+#                 return func.HttpResponse("List not found.", status_code=404)    
+
 @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
-def create_index_func(req:func.HttpRequest)->func.HttpResponse:
-    logging.info("create index triggered has been started")
+def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info("Upload data triggered")
     delta = req.params.get('delta', 'false').lower() == 'true'  
     delta_value = req.params.get('delta_value', '1')  
     delta_type = req.params.get('delta_type', 'days') 
-    sharepoint_site_details=SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url,delta,delta_value,delta_type)
-    site_id=sharepoint_site_details.get_sharepoint_id()
+    sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url, delta, delta_value, delta_type)
+    site_id = sharepoint_site_details.get_sharepoint_id()
+    
     if site_id:
-          logging.info(f"Site ID: {site_id}")
-          list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
-          if list_id:
-              logging.info(f"List ID: {list_id}")
-              list_data,field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
-              field_names=["Status","Level1","Level2","ContentType","Title","Level3","Likelihood","RiskId","RiskIssueStrategy","ProgramRisk","IsEsclated","TargetDate","Modified","Impact","FinancialImpact"]
+        logging.info(f"Site ID: {site_id}")
+        list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+        
+        if list_id:
+            logging.info(f"List ID: {list_id}")
+            list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+            field_names = ["Status", "Level1", "Level2", "ContentType", "Title", "Level3", "Likelihood", "RiskId", "RiskIssueStrategy", "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
 
-              embedding_generator = GetEmbeddings()
+            embedding_generator = GetEmbeddings()
+            embeddings = []
 
-              embeddings = []
-              for item in list_data:
-                    field_value = item.get("fields", {}).get("Status")  
-                    print(field_value)
-                    if field_value:
-                        embedding = embedding_generator.generate_embeddings(field_value)
-                        embeddings.append(embedding)
-                    else:
-                        embeddings.append([])
-              if list_data:
-                   azure_search = AzureIndex(SEARCH_ENDPOINT,SEARCH_ADMIN_KEY,SEARCH_INDEX_NAME)
-                   azure_search.create_azure_search_index(field_names)
-                   azure_search.upload_data_to_azure_search(list_data, embeddings,field_names)
-                   return func.HttpResponse("Data indexed successfully!", status_code=200)
-              else:
+            for item in list_data:
+                field_value = item.get("fields", {}).get("Status")
+                print(field_value)
+                if field_value:
+                    embedding = embedding_generator.generate_embeddings(field_value)
+                    embeddings.append(embedding)
+                else:
+                    embeddings.append([])
+
+            if list_data:
+                azure_search = AzureIndex(SEARCH_ENDPOINT, SEARCH_ADMIN_KEY, SEARCH_INDEX_NAME)
+                azure_search.upload_data_to_azure_search(list_data, embeddings, field_names)
+                return func.HttpResponse("Data indexed successfully!", status_code=200)
+            else:
                 return func.HttpResponse("No new or modified data found in the SharePoint list.", status_code=404)
-                  
-          else:
-                return func.HttpResponse("List not found.", status_code=404)    
-            
+        
+        else:
+            return func.HttpResponse("List not found.", status_code=404)
+    else:
+        return func.HttpResponse("Site not found.", status_code=404)          
 @app.route(route="MyHttpTrigger", auth_level=func.AuthLevel.FUNCTION)
 def MyHttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
@@ -260,7 +301,7 @@ def rag_chat_bot_session(req: func.HttpRequest) -> func.HttpResponse:
             }],
             model="gpt-4o",
             temperature=1,
-            top_p=5
+            
         )
         response=response.choices[0].message.content
     except Exception as e:
