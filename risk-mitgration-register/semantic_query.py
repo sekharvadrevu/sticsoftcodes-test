@@ -12,13 +12,13 @@ search_client = SearchClient(endpoint=search_endpoint,
                       index_name=index_name,
                       credential=credential)
 results =  search_client.search(query_type='semantic', semantic_configuration_name='my-semantic-config',
-    search_text="what hotel has a good restaurant on site", 
-    select='HotelName,Description,Category', query_caption='extractive')
+    search_text="what is the TestIMO 123", 
+    select='Title,Likelihood', query_caption='extractive')
 
 for result in results:
     print(result["@search.reranker_score"])
-    print(result["HotelName"])
-    print(f"Description: {result['Description']}")
+    print(result["Title"])
+    print(f"Likelihood: {result['Likelihood']}")
 
     captions = result["@search.captions"]
     if captions:

@@ -73,14 +73,14 @@ class AzureIndex:
                 
             )
 
-            try:
+            # try:
                 
-                existing_index = index_client.get_index(self.search_index_name)
-                print(f"Index '{self.search_index_name}' already exists. Deleting the existing index...")
-                index_client.delete_index(self.search_index_name)
-                print(f"Index '{self.search_index_name}' has been deleted.")
-            except Exception as e:
-                print(f"Index '{self.search_index_name}' not found.")
+            #     existing_index = index_client.get_index(self.search_index_name)
+            #     print(f"Index '{self.search_index_name}' already exists. Deleting the existing index...")
+            #     index_client.delete_index(self.search_index_name)
+            #     print(f"Index '{self.search_index_name}' has been deleted.")
+            # except Exception as e:
+            #     print(f"Index '{self.search_index_name}' not found.")
 
             try:
                 print(f"Creating index '{self.search_index_name}'...")
