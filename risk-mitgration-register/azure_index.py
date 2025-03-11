@@ -168,7 +168,7 @@ class AzureIndex:
     
     def upload_data_to_azure_search(self, data, embeddings, field_names):
         try:
-            # Create a SearchClient for uploading documents to the existing index
+           
             search_client = SearchClient(
                 endpoint=self.search_endpoint,
                 index_name=self.search_index_name,
@@ -177,55 +177,55 @@ class AzureIndex:
 
             documents = []
             for idx, item in enumerate(data):
-                doc = {"id": str(item["id"])}  # Assuming "id" is unique for each document
+                doc = {"id": str(item["id"])}  
 
-                # Process the fields from the input data and sanitize field names
+                
                 for field in field_names:
                     sanitized_field = self.sanitize_field_name(field)
-                    field_value = item["fields"].get(field, None)  # Get value or None if missing
+                    field_value = item["fields"].get(field, None)  
                     
-                    # Handle Edm.DateTimeOffset fields
+                    
                     if field_value is None or (isinstance(field_value, str) and field_value.strip() == ''):
-                        # If the value is None or empty string, set it to None (which is handled as null in Azure Search)
-                        if 'Date' in sanitized_field:  # Assumption: field names that contain 'Date' are of type Edm.DateTimeOffset
+                        
+                        if 'Date' in sanitized_field:  
                             field_value = None
 
-                    # Check for null values and replace with default values if necessary
+                   
                     if field_value is None:
-                        # You can decide a default value based on field type
+                       
                         if isinstance(field_value, str):
-                            field_value = ""  # Default for strings
+                            field_value = ""  
                         elif isinstance(field_value, (int, float)):
-                            field_value = 0.0  # Default for numeric fields (float)
+                            field_value = 0.0  
                         elif isinstance(field_value, bool):
-                            field_value = False  # Default for boolean fields
+                            field_value = False 
                         else:
-                            field_value = ""  # Fallback for other types
+                            field_value = "" 
 
-                    # Ensure correct field type assignment
+                    
                     if isinstance(field_value, str):
-                        doc[sanitized_field] = str(field_value)  # Assign string value
+                        doc[sanitized_field] = str(field_value) 
                     elif isinstance(field_value, bool):
-                        # Convert boolean values to "True" or "False" if the field is Edm.String
+                       
                         doc[sanitized_field] = "True" if field_value else "False"
                     elif isinstance(field_value, (int, float)):
-                        # Ensure numeric fields are floats (Edm.Double)
-                        doc[sanitized_field] = float(field_value)  # Ensuring the value is treated as a float (Edm.Double)
+                        
+                        doc[sanitized_field] = float(field_value)  #
                     elif isinstance(field_value, datetime):
-                        # Convert datetime objects to ISO format (Edm.DateTimeOffset)
+                        
                         doc[sanitized_field] = field_value.isoformat()
                     elif field_value is None:
-                        # Explicitly set None for fields that expect Edm.DateTimeOffset or other null-acceptable types
+                        
                         doc[sanitized_field] = None
                     else:
-                        doc[sanitized_field] = str(field_value)  # Default to string if unsure
+                        doc[sanitized_field] = str(field_value)  #
 
-                # Handle embedding (assuming it's a valid vector)
+               
                 doc['contentVector'] = embeddings[idx] if embeddings else []
 
                 documents.append(doc)
 
-            # Upload documents if there are any
+           
             if documents:
                 result = search_client.upload_documents(documents)
                 logging.info(f"Uploaded {len(result)} documents to the index.")
