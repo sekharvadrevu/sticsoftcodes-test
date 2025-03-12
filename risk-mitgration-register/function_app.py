@@ -17,7 +17,9 @@ client_id = os.getenv("client_id")
 client_secret = os.getenv("client_secret")
 tenant_id = os.getenv("tenant_id")
 site_url = os.getenv('site_url') 
-list_url = os.getenv('list_urls')  
+list_urls = json.loads(os.getenv("list_urls"))
+
+list_url=os.getenv("list_url")
 SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT")
 SEARCH_ADMIN_KEY = os.getenv("SEARCH_ADMIN_KEY")
 SEARCH_INDEX_NAME = os.getenv("SEARCH_INDEX_NAME")
@@ -81,62 +83,199 @@ def truncate_text(text, max_length):
                   
 #           else:
 #                 return func.HttpResponse("List not found.", status_code=404)    
-app.timer_trigger()
+
+@app.function_name(name="mytimer")
+@app.timer_trigger(schedule="0 */5 * * * *", 
+              arg_name="mytimer",
+              run_on_startup=True) 
+def test_function(mytimer: func.TimerRequest) -> None:
+    utc_timestamp = datetime.datetime.utcnow().replace(
+        tzinfo=datetime.timezone.utc).isoformat()
+    if mytimer.past_due:
+        logging.info('The timer is past due!')
+        print("Past due date",utc_timestamp)
+    logging.info('Python timer trigger function ran at %s', utc_timestamp)
+
+# @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
+# def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
+#     logging.info("Upload data triggered")
+#     delta = req.params.get('delta', 'false').lower() == 'true'  
+#     delta_value = req.params.get('delta_value', '1')  
+#     delta_type = req.params.get('delta_type', 'days') 
+#     sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url, delta, delta_value, delta_type)
+#     site_id = sharepoint_site_details.get_sharepoint_id()
+    
+#     if site_id:
+#         logging.info(f"Site ID: {site_id}")
+#         list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+        
+#         if list_id:
+#             logging.info(f"List ID: {list_id}")
+#             list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+#             field_names = ["Status", "Level1", "Level2", "ContentType", "Title", "Level3", "Likelihood", "RiskId", "RiskIssueStrategy", "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
+
+#             embedding_generator = GetEmbeddings()
+#             embeddings = []
+
+#             for item in list_data:
+#                 field_value = item.get("fields", {}).get("Status")
+#                 print(field_value)
+#                 if field_value:
+#                     embedding = embedding_generator.generate_embeddings(field_value)
+#                     embeddings.append(embedding)
+#                 else:
+#                     embeddings.append([])
+
+#             if list_data:
+#                 azure_search = AzureIndex(SEARCH_ENDPOINT, SEARCH_ADMIN_KEY, SEARCH_INDEX_NAME)
+#                 azure_search.upload_data_to_azure_search(list_data, embeddings, field_names)
+#                 return func.HttpResponse("Data indexed successfully!", status_code=200)
+#             else:
+#                 return func.HttpResponse("No new or modified data found in the SharePoint list.", status_code=404)
+        
+#         else:
+#             return func.HttpResponse("List not found.", status_code=404)
+#     else:
+#         return func.HttpResponse("Site not found.", status_code=404) 
+    
+    
 @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
 def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Upload data triggered")
-    delta = req.params.get('delta', 'false').lower() == 'true'  
-    delta_value = req.params.get('delta_value', '1')  
-    delta_type = req.params.get('delta_type', 'days') 
-    sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url, delta, delta_value, delta_type)
+    
+    # Parameters
+    delta = req.params.get('delta', 'false').lower() == 'true'
+    delta_value = req.params.get('delta_value', '1')
+    delta_type = req.params.get('delta_type', 'days')
+    
+    
+    sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_urls, delta, delta_value, delta_type)
     site_id = sharepoint_site_details.get_sharepoint_id()
     
     if site_id:
         logging.info(f"Site ID: {site_id}")
-        list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
-        
-        if list_id:
-            logging.info(f"List ID: {list_id}")
-            list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
-            field_names = ["Status", "Level1", "Level2", "ContentType", "Title", "Level3", "Likelihood", "RiskId", "RiskIssueStrategy", "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
 
-            embedding_generator = GetEmbeddings()
-            embeddings = []
+       
+       
+        all_embeddings = []
 
-            for item in list_data:
-                field_value = item.get("fields", {}).get("Status")
-                print(field_value)
-                if field_value:
-                    embedding = embedding_generator.generate_embeddings(field_value)
-                    embeddings.append(embedding)
-                else:
-                    embeddings.append([])
+        for list_url in list_urls:
+            list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+            
+            if list_id:
+                logging.info(f"Processing List ID: {list_id} for List URL: {list_url}")
+                list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+                
+                
+                field_names = ["Status", "Level1", "Level2", "ContentType","ResponseDate", "ResponsePlan" ,"Title", "Level3", "Likelihood","ResponseOwner", "RiskId", "RiskIssueStrategy", "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
+                
+                
+                embedding_generator = GetEmbeddings()
+                embeddings = []
+                for item in list_data:
+                    field_value = item.get("fields", {}).get("Status")
+                    print(field_value)
+                    if field_value:
+                        embedding = embedding_generator.generate_embeddings(field_value)
+                        embeddings.append(embedding)
+                    else:
+                        embeddings.append([])
 
-            if list_data:
-                azure_search = AzureIndex(SEARCH_ENDPOINT, SEARCH_ADMIN_KEY, SEARCH_INDEX_NAME)
-                azure_search.upload_data_to_azure_search(list_data, embeddings, field_names)
-                return func.HttpResponse("Data indexed successfully!", status_code=200)
+               
+                all_embeddings.append((list_data, embeddings, field_names))
             else:
-                return func.HttpResponse("No new or modified data found in the SharePoint list.", status_code=404)
+                logging.error(f"List not found for URL: {list_url}")
         
+      
+        if all_embeddings:
+            azure_search = AzureIndex(SEARCH_ENDPOINT, SEARCH_ADMIN_KEY, SEARCH_INDEX_NAME)
+            for list_data, embeddings, field_names in all_embeddings:
+                azure_search.upload_data_to_azure_search(list_data, embeddings, field_names)
+            
+            return func.HttpResponse("All lists indexed successfully!", status_code=200)
         else:
-            return func.HttpResponse("List not found.", status_code=404)
+            return func.HttpResponse("No new or modified data found in the SharePoint lists.", status_code=404)
     else:
-        return func.HttpResponse("Site not found.", status_code=404) 
+        return func.HttpResponse("Site not found.", status_code=404)
+    
+# @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
+# def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
+#     logging.info("Upload data triggered")
+    
+#     # Fetch query parameters
+#     delta = req.params.get('delta', 'false').lower() == 'true'  
+#     delta_value = req.params.get('delta_value', '1')  
+#     delta_type = req.params.get('delta_type', 'days') 
+    
+    
+    
+#     sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_url, delta, delta_value, delta_type)  # Use the first URL to get site details
+#     site_id = sharepoint_site_details.get_sharepoint_id()
+    
+#     if site_id:
+#         logging.info(f"Site ID: {site_id}")
+        
+        
+#         all_indexed = True  
+        
+#         for list_urls in list_url:
+#             logging.info(f"Processing List: {list_url}")
+            
+#             list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+            
+#             if list_id:
+#                 logging.info(f"List ID: {list_id}")
+#                 list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+                
+#                 field_names = ["Status", "Level1", "Level2", "ContentType", "Title", "Level3", "Likelihood", "RiskId", "RiskIssueStrategy", "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
+
+#                 embedding_generator = GetEmbeddings()
+#                 embeddings = []
+
+#                 for item in list_data:
+#                     field_value = item.get("fields", {}).get("Status")
+#                     print(field_value)
+#                     if field_value:
+#                         embedding = embedding_generator.generate_embeddings(field_value)
+#                         embeddings.append(embedding)
+#                     else:
+#                         embeddings.append([])
+
+#                 if list_data:
+#                     azure_search = AzureIndex(SEARCH_ENDPOINT, SEARCH_ADMIN_KEY, SEARCH_INDEX_NAME)
+#                     azure_search.upload_data_to_azure_search(list_data, embeddings, field_names)
+#                     logging.info(f"List data for {list_url} indexed successfully.")
+#                 else:
+#                     logging.warning(f"No new or modified data found in the SharePoint list: {list_url}")
+#                     all_indexed = False
+#             else:
+#                 logging.warning(f"List not found: {list_url}")
+#                 all_indexed = False
+        
+#         # Return appropriate response
+#         if all_indexed:
+#             return func.HttpResponse("Data indexed successfully for all lists.", status_code=200)
+#         else:
+#             return func.HttpResponse("Some lists could not be indexed.", status_code=404)
+    
+#     else:
+#         return func.HttpResponse("Site not found.", status_code=404)
 def item_exists_in_index(existing_data, new_item):
     """ Helper function to check if the item is already in the index based on a unique identifier (e.g., RiskId) """
     id = new_item.get("fields", {}).get("id")
     return any(existing_item.get("id") == id for existing_item in existing_data)
 
 # @app.function_name(name="testingtimer")
-# @app.timer_trigger(schedule="0 0 9-17 * * *", 
+# @app.timer_trigger(schedule="0 */5 * * * *", 
 #               arg_name="testingtimer",
 #               run_on_startup=True) 
 # def test_function(mytimer: func.TimerRequest) -> None:
 #     utc_timestamp = datetime.datetime.utcnow().replace(
 #         tzinfo=datetime.timezone.utc).isoformat()
+    
 #     if mytimer.past_due:
 #         logging.info('The timer is past due!')
+#         print("The timer  is past due!",utc_timestamp)
 #     logging.info('Python timer trigger function ran at %s', utc_timestamp)
 
   

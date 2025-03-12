@@ -172,7 +172,6 @@ class AzureIndex:
     
     def upload_data_to_azure_search(self, data, embeddings, field_names):
         try:
-           
             search_client = SearchClient(
                 endpoint=self.search_endpoint,
                 index_name=self.search_index_name,
@@ -183,20 +182,20 @@ class AzureIndex:
             for idx, item in enumerate(data):
                 doc = {"id": str(item["id"])}  
 
-                
                 for field in field_names:
                     sanitized_field = self.sanitize_field_name(field)
                     field_value = item["fields"].get(field, None)  
-                    
-                    
+
+                    # Log the field value and its type to identify the problem
+                    logging.info(f"Field: {sanitized_field}, Value: {field_value}, Type: {type(field_value)}")
+
+                    # Handle empty or None values
                     if field_value is None or (isinstance(field_value, str) and field_value.strip() == ''):
-                        
                         if 'Date' in sanitized_field:  
                             field_value = None
 
-                   
+                    # Ensure that the value is not None or empty before assigning
                     if field_value is None:
-                       
                         if isinstance(field_value, str):
                             field_value = ""  
                         elif isinstance(field_value, (int, float)):
@@ -205,37 +204,47 @@ class AzureIndex:
                             field_value = False 
                         else:
                             field_value = "" 
-
-                    
+                    if isinstance(field_value, str) and field_value.strip() == '':
+                       
+                        if sanitized_field in ['FinancialImpact']: 
+                            field_value = None 
+                        else:
+                            field_value = ""
+                    # Convert the field value to the correct type
                     if isinstance(field_value, str):
                         doc[sanitized_field] = str(field_value) 
                     elif isinstance(field_value, bool):
-                       
                         doc[sanitized_field] = "True" if field_value else "False"
                     elif isinstance(field_value, (int, float)):
+                        if sanitized_field == "RiskId":
                         
-                        doc[sanitized_field] = float(field_value)  #
+                         field_value = str(field_value)
+                         doc[sanitized_field]=str(field_value)
+                        else:
+                         field_value = float(field_value)  
+                         doc[sanitized_field] = float(field_value)  
                     elif isinstance(field_value, datetime):
-                        
                         doc[sanitized_field] = field_value.isoformat()
                     elif field_value is None:
-                        
                         doc[sanitized_field] = None
                     else:
                         doc[sanitized_field] = str(field_value)  #
 
-               
+                    # Log the final field assignment
+                    logging.info(f"Field {sanitized_field} set to {doc[sanitized_field]}")
+
+                # Add the embeddings vector to the document
                 doc['contentVector'] = embeddings[idx] if embeddings else []
 
                 documents.append(doc)
 
-           
+            # Upload documents if there are any
             if documents:
                 result = search_client.upload_documents(documents)
                 logging.info(f"Uploaded {len(result)} documents to the index.")
             else:
                 logging.info("No documents to upload.")
-                
+                    
         except Exception as e:
             logging.error(f"Error uploading data to Azure Search: {str(e)}")
             
