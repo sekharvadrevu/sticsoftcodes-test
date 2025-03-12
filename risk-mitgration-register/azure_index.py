@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Dict, List
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchIndex
@@ -16,6 +17,9 @@ class AzureIndex:
         self.search_endpoint = search_endpoint
         self.search_admin_key = search_admin_key
         self.search_index_name = search_index_name
+        self.search_client = SearchClient(endpoint=self.search_endpoint,
+                                          index_name=self.search_index_name,
+                                          credential=AzureKeyCredential(search_admin_key))
     def sanitize_field_name(self, field_name):
         sanitized_name = re.sub(r'^[^a-zA-Z]+', '', field_name)  
         sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', sanitized_name)  
@@ -234,3 +238,18 @@ class AzureIndex:
                 
         except Exception as e:
             logging.error(f"Error uploading data to Azure Search: {str(e)}")
+            
+    def get_existing_data(self) -> List[Dict]:
+        """
+        Fetch existing documents from the Azure Search index.
+        This will help in identifying whether the data is already indexed or if it is new/modified.
+        """
+        try:
+            
+            search_results = self.search_client.search(search_text="*", select=["id", "Status", "Modified"])
+            existing_data = [doc for doc in search_results]
+            logging.info(f"Fetched {len(existing_data)} existing documents from the Azure Search index.")
+            return existing_data
+        except Exception as e:
+            logging.error(f"Error fetching existing data from Azure Search: {str(e)}")
+            return []

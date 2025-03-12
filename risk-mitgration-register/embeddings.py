@@ -10,7 +10,7 @@ EMBEDDING_API_VERSION = os.getenv("AZURE_OPENAI_EMBEDDING_API_VERSION")
 
 class GetEmbeddings:
     def __init__(self):
-        # Initialize Azure OpenAI client
+        
         self.client = AzureOpenAI(
             api_key=AZURE_OPENAI_KEY,
             api_version=EMBEDDING_API_VERSION,

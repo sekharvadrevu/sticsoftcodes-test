@@ -81,7 +81,7 @@ def truncate_text(text, max_length):
                   
 #           else:
 #                 return func.HttpResponse("List not found.", status_code=404)    
-
+app.timer_trigger()
 @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
 def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Upload data triggered")
@@ -122,7 +122,24 @@ def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
         else:
             return func.HttpResponse("List not found.", status_code=404)
     else:
-        return func.HttpResponse("Site not found.", status_code=404)          
+        return func.HttpResponse("Site not found.", status_code=404) 
+def item_exists_in_index(existing_data, new_item):
+    """ Helper function to check if the item is already in the index based on a unique identifier (e.g., RiskId) """
+    id = new_item.get("fields", {}).get("id")
+    return any(existing_item.get("id") == id for existing_item in existing_data)
+
+# @app.function_name(name="testingtimer")
+# @app.timer_trigger(schedule="0 0 9-17 * * *", 
+#               arg_name="testingtimer",
+#               run_on_startup=True) 
+# def test_function(mytimer: func.TimerRequest) -> None:
+#     utc_timestamp = datetime.datetime.utcnow().replace(
+#         tzinfo=datetime.timezone.utc).isoformat()
+#     if mytimer.past_due:
+#         logging.info('The timer is past due!')
+#     logging.info('Python timer trigger function ran at %s', utc_timestamp)
+
+  
 @app.route(route="MyHttpTrigger", auth_level=func.AuthLevel.FUNCTION)
 def MyHttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
@@ -310,10 +327,10 @@ def rag_chat_bot_session(req: func.HttpRequest) -> func.HttpResponse:
 
     
     return func.HttpResponse(
-                json.dumps(response),
-                mimetype="application/json",
-                status_code=200
-            )
+        json.dumps({"response": response}),  
+        mimetype="application/json",
+        status_code=200
+    )
     
 
  
