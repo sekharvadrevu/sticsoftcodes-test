@@ -11,6 +11,8 @@ from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizableTextQuery
 from azure_index import AzureIndex
 from embeddings import GetEmbeddings
+
+from azure.storage.blob import BlobServiceClient
 from sharepoint import SharepointConnector
 app = func.FunctionApp()
 client_id = os.getenv("client_id")
@@ -18,7 +20,8 @@ client_secret = os.getenv("client_secret")
 tenant_id = os.getenv("tenant_id")
 site_url = os.getenv('site_url') 
 list_urls = json.loads(os.getenv("list_urls"))
-
+BLOB_CONNECTION_STRING=os.getenv("connectionstring")
+BLOB_CONTAINER_NAME=os.getenv("BLOB_CONTAINER_NAME")
 list_url=os.getenv("list_url")
 SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT")
 SEARCH_ADMIN_KEY = os.getenv("SEARCH_ADMIN_KEY")
@@ -95,6 +98,117 @@ def test_function(mytimer: func.TimerRequest) -> None:
         logging.info('The timer is past due!')
         print("Past due date",utc_timestamp)
     logging.info('Python timer trigger function ran at %s', utc_timestamp)
+    logging.info(f"Function triggered at {datetime.datetime.now()}")
+    
+    
+    delta = False
+    delta_value = '1'
+    delta_type = 'days'
+    
+   
+    client_id = os.getenv("client_id")
+    client_secret = os.getenv("client_secret")
+    tenant_id = os.getenv("tenant_id")
+    site_url = os.getenv('site_url') 
+    list_urls = json.loads(os.getenv("list_urls"))
+    
+    
+    sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_urls, delta, delta_value, delta_type)
+    site_id = sharepoint_site_details.get_sharepoint_id()
+    
+    if site_id:
+        logging.info(f"Site ID: {site_id}")
+        
+        all_embeddings = []
+        
+        
+        for list_url in list_urls:
+            list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
+            
+            if list_id:
+                logging.info(f"Processing List ID: {list_id} for List URL: {list_url}")
+                list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+                
+               
+                field_names = ["Status", "Level1", "Level2", "ContentType", "ResponseDate", "ResponsePlan", 
+                               "Title", "Level3", "Likelihood", "ResponseOwner", "RiskId", "RiskIssueStrategy", 
+                               "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact"]
+                
+                
+                embedding_generator = GetEmbeddings()
+                embeddings = []
+                
+                
+                for item in list_data:
+                    field_value = item.get("fields", {}).get("Status")
+                    if field_value:
+                        embedding = embedding_generator.generate_embeddings(field_value)
+                        embeddings.append(embedding)
+                    else:
+                        embeddings.append([])  
+
+                all_embeddings.append((list_data, embeddings, field_names))
+            else:
+                logging.error(f"List not found for URL: {list_url}")
+        
+        
+        if all_embeddings:
+            
+            blob_service_client = BlobServiceClient.from_connection_string(BLOB_CONNECTION_STRING)
+            container_client = blob_service_client.get_container_client(BLOB_CONTAINER_NAME)
+            
+            
+            combined_data_json = json.dumps(all_embeddings)
+            
+            blob_name = f"combined_sharepoint_data_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+            blob_client = container_client.get_blob_client(blob_name)
+            
+
+            blob_client.upload_blob(combined_data_json, overwrite=True)
+            logging.info(f"Combined data uploaded to Blob Storage: {blob_name}")
+            
+            
+            index_data_in_search(combined_data_json)
+            
+            return func.HttpResponse("All lists indexed and uploaded successfully!", status_code=200)
+        else:
+            logging.warning("No new or modified data found in the SharePoint lists.")
+            return func.HttpResponse("No new or modified data found.", status_code=404)
+    else:
+        logging.error("Site not found.")
+        return func.HttpResponse("Site not found.", status_code=404)
+
+def index_data_in_search(combined_data_json):
+    """Function to index combined data into Azure Cognitive Search."""
+    try:
+        
+        all_combined_data = json.loads(combined_data_json)
+        
+        
+        search_client = SearchClient(endpoint=SEARCH_ENDPOINT,
+                                     index_name=SEARCH_INDEX_NAME,
+                                     credential=AzureKeyCredential(SEARCH_ADMIN_KEY))
+        
+        
+        documents = []
+        for list_data, embeddings, field_names in all_combined_data:
+            for item in list_data:
+                document = {
+                    "id": item.get("Id"),  
+                    "Title": item.get("fields", {}).get("Title"),
+                    "Status": item.get("fields", {}).get("Status"),
+                   
+                }
+                documents.append(document)
+        
+        
+        if documents:
+            result = search_client.upload_documents(documents=documents)
+            logging.info(f"Successfully uploaded {len(documents)} documents to Azure Search.")
+        else:
+            logging.warning("No documents to upload to Azure Search.")
+    except Exception as e:
+        logging.error(f"Error indexing data in Azure Cognitive Search: {str(e)}")
 
 # @app.route(route="create-index", auth_level=func.AuthLevel.FUNCTION)
 # def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
@@ -143,7 +257,6 @@ def test_function(mytimer: func.TimerRequest) -> None:
 def create_index_func(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Upload data triggered")
     
-    # Parameters
     delta = req.params.get('delta', 'false').lower() == 'true'
     delta_value = req.params.get('delta_value', '1')
     delta_type = req.params.get('delta_type', 'days')
