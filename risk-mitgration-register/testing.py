@@ -1,139 +1,102 @@
 import logging
-import requests
-import azure.functions as func
-from datetime import datetime
-from azure.core.credentials import AzureKeyCredential
-from azure.search.documents import SearchClient
 import json
+import os
 from azure.storage.blob import BlobServiceClient
- 
+from dotenv import load_dotenv
+import azure.functions as func
+from sharepoint import SharepointConnector
 
-sharepoint_site_url = "https://yoursharepointsite"
-sharepoint_list_names = ["List1", "List2", "List3"] 
-api_base_url = f"{sharepoint_site_url}/_api/web/lists/getbytitle"
- 
+# Load environment variables
+load_dotenv()
 
-search_service_name = "your-search-service-name"
-search_api_key = "YOUR_SEARCH_API_KEY"
-search_endpoint = f"https://{search_service_name}.search.windows.net"
-search_index_name = "combined-index-name"  
- 
+# Retrieve environment variables
+BLOB_CONNECTION_STRING = os.getenv("connectionstring")
+BLOB_CONTAINER_NAME = os.getenv("BLOB_CONTAINER_NAME")
+client_id = os.getenv("client_id")
+client_secret = os.getenv("client_secret")
+tenant_id = os.getenv("tenant_id")
+site_url = os.getenv('site_url') 
+list_urls = json.loads(os.getenv("list_urls"))
 
-blob_connection_string = "YOUR_BLOB_STORAGE_CONNECTION_STRING"
-container_name = "your-container-name"
-blob_name = "last-sync-times.json"  
 
-def get_last_sync_times():
-    blob_service_client = BlobServiceClient.from_connection_string(blob_connection_string)
-    container_client = blob_service_client.get_container_client(container_name)
-    blob_client = container_client.get_blob_client(blob_name)
-    
-    try:
-        blob_data = blob_client.download_blob()
-        last_sync_times = json.loads(blob_data.content_as_text())
-        return last_sync_times
-    except Exception as e:
-        logging.error(f"Error retrieving last sync times: {e}")
-        return {}
- 
+delta = False
+delta_value = '1'
+delta_type = 'days'
 
-def update_last_sync_times(last_sync_times):
-    blob_service_client = BlobServiceClient.from_connection_string(blob_connection_string)
-    container_client = blob_service_client.get_container_client(container_name)
-    blob_client = container_client.get_blob_client(blob_name)
-    
-    try:
-        blob_client.upload_blob(json.dumps(last_sync_times), overwrite=True)
-        logging.info(f"Last sync times updated.")
-    except Exception as e:
-        logging.error(f"Error updating last sync times: {e}")
- 
 
-def fetch_sharepoint_data(list_name, last_sync_time):
-    api_url = f"{api_base_url}('{list_name}')/items?$filter=Modified ge {last_sync_time}"
-    headers = {
-        'Authorization': 'Bearer YOUR_ACCESS_TOKEN',
-        'Accept': 'application/json'
-    }
- 
-    try:
-        response = requests.get(api_url, headers=headers)
-        if response.status_code == 200:
-            return response.json().get('value', [])
+sharepoint_site_details = SharepointConnector(client_id, client_secret, tenant_id, site_url, list_urls, delta, delta_value, delta_type)
+
+
+site_id = sharepoint_site_details.get_sharepoint_id()
+
+
+desired_field_names = [
+    "Status", "Level1", "Level2", "ContentType", "ResponseDate", "ResponsePlan", 
+    "Title", "Level3", "Likelihood", "ResponseOwner", "RiskId", "RiskIssueStrategy", 
+    "RiskIssueRaisedBy", "ProgramRisk", "IsEsclated", "TargetDate", "Modified", "Impact", "FinancialImpact",
+    "RiskIssueDescription", "Created", "RevisedResponseDate", "RiskIssueID"
+]
+
+def clean_data(item):
+    """
+    Function to clean data by keeping only the desired fields and replacing null or empty values with an empty string.
+    """
+    cleaned_item = {}
+    for field in desired_field_names:
+        value = item.get("fields", {}).get(field)
+        if value is None or value == "":
+            cleaned_item[field] = ""
         else:
-            logging.error(f"Failed to fetch data for {list_name}. Status code: {response.status_code}")
-            return []
-    except Exception as e:
-        logging.error(f"Error fetching data for {list_name}: {e}")
-        return []
- 
+            cleaned_item[field] = value
+    return cleaned_item
 
-def upload_to_search_index(documents):
-    search_client = SearchClient(endpoint=search_endpoint,
-                                 index_name=search_index_name,
-                                 credential=AzureKeyCredential(search_api_key))
+if site_id:
+    logging.info(f"Site ID: {site_id}")
+
+    combined_data = [] 
     
-    try:
-        result = search_client.upload_documents(documents=documents)
-        logging.info(f"Indexed {len(result)} documents to {search_index_name}.")
-    except Exception as e:
-        logging.error(f"Error uploading documents to {search_index_name}: {e}")
- 
-def main(mytimer: func.TimerRequest) -> None:
     
-    logging.info(f"Function triggered at {datetime.now()}.")
- 
-    
-    last_sync_times = get_last_sync_times()
- 
-   
-    all_documents = []
-    latest_sync_time = "2000-01-01T00:00:00Z"  
- 
-   
-    for list_name in sharepoint_list_names:
-        logging.info(f"Processing SharePoint list: {list_name}")
- 
+    for list_url in list_urls:
+        list_id = sharepoint_site_details.get_list_id_from_list_url(list_url, site_id)
         
-        list_last_sync_time = last_sync_times.get(list_name, "2000-01-01T00:00:00Z")
-        logging.info(f"Last sync time for {list_name}: {list_last_sync_time}")
- 
-        
-        items = fetch_sharepoint_data(list_name, list_last_sync_time)
- 
-        if items:
+        if list_id:
+            logging.info(f"Processing List ID: {list_id} for List URL: {list_url}")
+            list_data, field_names = sharepoint_site_details.get_sharepoint_list_data(list_id, site_id)
+
+            # Clean each list's data
+            cleaned_list_data = [clean_data(item) for item in list_data]
+
            
-            for item in items:
-                doc = {
-                    'id': str(item['ID']),
-                    'title': item.get('Title', ''),
-                    'description': item.get('Description', ''),
-                    'createdDate': item.get('Created', ''),
-                    'modifiedDate': item.get('Modified', ''),
-                    'listName': list_name 
-                }
- 
-                
-                item_modified_time = item.get('Modified', '')
-                if item_modified_time > latest_sync_time:
-                    latest_sync_time = item_modified_time
- 
-                
-                all_documents.append(doc)
- 
-   
-    if all_documents:
-        upload_to_search_index(all_documents)
- 
-   
-    for list_name in sharepoint_list_names:
-        last_sync_times[list_name] = latest_sync_time
- 
-    
-    update_last_sync_times(last_sync_times)
- 
-   
-    if mytimer.past_due:
-     logging.info(f"Timer is past due! Last run was at {datetime.now()}")
+            combined_data.extend(cleaned_list_data)  
+        else:
+            logging.error(f"List not found for URL: {list_url}")
+
+  
+    if combined_data:
+        
+        blob_service_client = BlobServiceClient.from_connection_string(BLOB_CONNECTION_STRING)
+        container_client = blob_service_client.get_container_client(BLOB_CONTAINER_NAME)
+
+        
+        combined_data_json = json.dumps(combined_data)
+
+       
+        blob_name = "register-mitagations.json"
+
+      
+        blob_client = container_client.get_blob_client(blob_name)
+        
+        try:
+            
+            blob_client.upload_blob(combined_data_json, overwrite=True)
+            logging.info(f"Combined SharePoint data successfully uploaded to Azure Blob Storage: {blob_name}")
+            print(f"Azure blob storage successfully done: {blob_name}")
+        except Exception as e:
+            logging.error(f"Failed to upload to Azure Blob Storage: {e}")
+            print(f"Error: {e}")
     else:
-        logging.info(f"Function ran at {datetime.now()}")
+        logging.warning("No SharePoint data found to upload.")
+        print("No SharePoint data found to upload.")
+else:
+    logging.error("No SharePoint site found.")
+    print("No SharePoint site found.")
